@@ -1,8 +1,25 @@
+import os
 import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Optional
 
 from models import FolderChannel, IndexChannel
+
+
+def hide_folder_on_windows(folder: Path) -> None:
+    if os.name != "nt":
+        return
+
+    try:
+        subprocess.run(
+            ["attrib", "+h", str(folder)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
 
 
 class Database:
@@ -11,8 +28,12 @@ class Database:
 
     @classmethod
     def for_main_folder(cls, main_folder: Path) -> "Database":
+        main_folder = main_folder.expanduser().resolve()
+
         telesync_dir = main_folder / ".telesync"
         telesync_dir.mkdir(parents=True, exist_ok=True)
+
+        hide_folder_on_windows(telesync_dir)
 
         return cls(telesync_dir / "telesync.db")
 
@@ -100,7 +121,7 @@ class Database:
             conn.commit()
 
     def get_folder_channel(self, folder_path: Path) -> Optional[FolderChannel]:
-        normalized_path = str(folder_path.resolve())
+        normalized_path = str(folder_path.expanduser().resolve())
 
         with self.connect() as conn:
             row = conn.execute(
@@ -143,7 +164,7 @@ class Database:
             conn.commit()
 
     def is_file_uploaded(self, folder_path: Path, file_hash: str) -> bool:
-        normalized_path = str(folder_path.resolve())
+        normalized_path = str(folder_path.expanduser().resolve())
 
         with self.connect() as conn:
             row = conn.execute(
@@ -177,8 +198,8 @@ class Database:
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    str(folder_path.resolve()),
-                    str(file_path.resolve()),
+                    str(folder_path.expanduser().resolve()),
+                    str(file_path.expanduser().resolve()),
                     file_hash,
                     file_size,
                     telegram_message_id,
