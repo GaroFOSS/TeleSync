@@ -1,5 +1,9 @@
 pyaes==1.6.1
 pyasn1==0.6.3
+PySide6==6.11.1
+PySide6_Addons==6.11.1
+PySide6_Essentials==6.11.1
 python-dotenv==1.2.2
 rsa==4.9.1
+shiboken6==6.11.1
 Telethon==1.44.0

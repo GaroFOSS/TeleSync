@@ -14,10 +14,21 @@ env/
 *.session
 *.session-journal
 
+# App state
+telesync_state.json
+
+# Local per-folder TeleSync data
+.telesync/
+
 # SQLite database
 *.db
 *.sqlite
 *.sqlite3
+
+# PyInstaller
+build/
+dist/
+*.spec
 
 # OS/editor
 .DS_Store

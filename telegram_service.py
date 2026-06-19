@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional, cast
 
 from telethon import TelegramClient, functions
-from telethon.tl.types import InputPeerChannel, Updates, Channel
+from telethon.tl.types import Channel, InputPeerChannel, Updates
 
 from database import Database
 from models import FolderChannel, IndexChannel
@@ -19,21 +19,29 @@ class TelegramService:
         self.client = client
         self.database = database
 
-    async def get_or_create_index_channel(self, title: str) -> IndexChannel:
+    async def get_or_create_index_channel(self, main_folder: Path) -> IndexChannel:
         existing = self.database.get_index_channel()
 
         if existing:
             return existing
 
-        result = await self.client(
-            functions.channels.CreateChannelRequest(
-                title=title,
-                about="Index channel for automatically created folder upload channels.",
-                broadcast=True,
-            )
+        title = f"TeleSync - {main_folder.name}"
+
+        result = cast(
+            Updates,
+            await self.client(
+                functions.channels.CreateChannelRequest(
+                    title=title,
+                    about=f"TeleSync index channel for main folder: {main_folder}",
+                    broadcast=True,
+                )
+            ),
         )
 
-        channel = result.chats[0]
+        channel = cast(Channel, result.chats[0])
+
+        if channel.access_hash is None:
+            raise RuntimeError("Created index channel does not have an access_hash.")
 
         index_channel = IndexChannel(
             title=title,
@@ -46,12 +54,12 @@ class TelegramService:
         await self.send_message_to_channel(
             channel=index_channel,
             message=(
-                "📌 **Folder upload index channel created.**\n\n"
-                "Every new folder channel created by the uploader will be posted here."
+                "📌 **TeleSync index channel created**\n\n"
+                f"Main folder:\n`{main_folder.resolve()}`\n\n"
+                "Every new folder channel created inside this main folder "
+                "will be posted here."
             ),
         )
-
-        print(f"[NEW INDEX CHANNEL] Created '{title}'")
 
         return index_channel
 
@@ -77,15 +85,21 @@ class TelegramService:
     ) -> FolderChannel:
         title = normalize_title(folder_path.name)
 
-        result = await self.client(
-            functions.channels.CreateChannelRequest(
-                title=title,
-                about=f"Automatic upload channel for folder: {folder_path}",
-                broadcast=True,
-            )
+        result = cast(
+            Updates,
+            await self.client(
+                functions.channels.CreateChannelRequest(
+                    title=title,
+                    about=f"Automatic TeleSync upload channel for folder: {folder_path}",
+                    broadcast=True,
+                )
+            ),
         )
 
-        telegram_channel = result.chats[0]
+        telegram_channel = cast(Channel, result.chats[0])
+
+        if telegram_channel.access_hash is None:
+            raise RuntimeError("Created folder channel does not have an access_hash.")
 
         invite_link = await self.export_invite_link(
             channel_id=telegram_channel.id,
@@ -107,11 +121,6 @@ class TelegramService:
             folder_path=folder_path,
             folder_channel=folder_channel,
         )
-
-        print(f"[NEW CHANNEL] Created '{title}' for {folder_path}")
-
-        if invite_link:
-            print(f"[INVITE LINK] {invite_link}")
 
         return folder_channel
 
@@ -153,7 +162,7 @@ class TelegramService:
                 f"**Folder name:** `{folder_path.name}`\n"
                 f"**Folder path:** `{folder_path.resolve()}`\n"
                 f"**Telegram channel:** {folder_channel.title}\n\n"
-                "⚠️ Could not generate an invite link automatically."
+                "⚠️ Could not generate invite link automatically."
             )
 
         await self.send_message_to_channel(

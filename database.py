@@ -6,8 +6,15 @@ from models import FolderChannel, IndexChannel
 
 
 class Database:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: Path):
         self.db_path = db_path
+
+    @classmethod
+    def for_main_folder(cls, main_folder: Path) -> "Database":
+        telesync_dir = main_folder / ".telesync"
+        telesync_dir.mkdir(parents=True, exist_ok=True)
+
+        return cls(telesync_dir / "telesync.db")
 
     def connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
@@ -89,6 +96,7 @@ class Database:
                     channel.access_hash,
                 ),
             )
+
             conn.commit()
 
     def get_folder_channel(self, folder_path: Path) -> Optional[FolderChannel]:
@@ -131,6 +139,7 @@ class Database:
                     channel.invite_link,
                 ),
             )
+
             conn.commit()
 
     def is_file_uploaded(self, folder_path: Path, file_hash: str) -> bool:
@@ -175,4 +184,5 @@ class Database:
                     telegram_message_id,
                 ),
             )
+
             conn.commit()

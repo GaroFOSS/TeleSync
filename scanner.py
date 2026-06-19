@@ -1,11 +1,17 @@
+import asyncio
 import hashlib
 from pathlib import Path
+from typing import Callable
 
 from telethon.errors import FloodWaitError
 
 from database import Database
 from models import IndexChannel
 from telegram_service import TelegramService
+
+
+LogCallback = Callable[[str], None]
+StatusCallback = Callable[[str, str], None]
 
 
 def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -18,21 +24,36 @@ def file_sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def iter_files(folder_path: Path):
+def should_ignore_path(path: Path) -> bool:
     ignored_suffixes = {
         ".part",
         ".tmp",
         ".crdownload",
     }
 
+    if path.name.startswith("."):
+        return True
+
+    if path.suffix.lower() in ignored_suffixes:
+        return True
+
+    if ".telesync" in path.parts:
+        return True
+
+    return False
+
+
+def iter_files(folder_path: Path):
     for path in folder_path.rglob("*"):
         if not path.is_file():
             continue
 
-        if path.name.startswith("."):
+        relative_parts = path.relative_to(folder_path).parts
+
+        if any(part.startswith(".") for part in relative_parts):
             continue
 
-        if path.suffix.lower() in ignored_suffixes:
+        if should_ignore_path(path):
             continue
 
         yield path
@@ -41,37 +62,51 @@ def iter_files(folder_path: Path):
 class FolderScanner:
     def __init__(
         self,
-        root_folder: Path,
+        main_folder: Path,
         database: Database,
         telegram_service: TelegramService,
         index_channel: IndexChannel,
+        log: LogCallback,
+        status: StatusCallback,
     ):
-        self.root_folder = root_folder
+        self.main_folder = main_folder
         self.database = database
         self.telegram_service = telegram_service
         self.index_channel = index_channel
+        self.log = log
+        self.status = status
 
     async def scan_once(self) -> None:
-        if not self.root_folder.exists():
-            raise FileNotFoundError(f"Root folder does not exist: {self.root_folder}")
+        if not self.main_folder.exists():
+            raise FileNotFoundError(f"Main folder does not exist: {self.main_folder}")
 
-        if not self.root_folder.is_dir():
-            raise NotADirectoryError(f"Root path is not a folder: {self.root_folder}")
+        if not self.main_folder.is_dir():
+            raise NotADirectoryError(f"Main folder path is not a directory: {self.main_folder}")
 
-        subfolders = sorted(path for path in self.root_folder.iterdir() if path.is_dir())
+        self.status(str(self.main_folder), "Scanning")
+
+        subfolders = sorted(
+            path for path in self.main_folder.iterdir()
+            if path.is_dir()
+            and path.name != ".telesync"
+            and not path.name.startswith(".")
+        )
 
         if not subfolders:
-            print(f"[INFO] No subfolders found in {self.root_folder}")
+            self.log(f"[INFO] No subfolders found in {self.main_folder}")
+            self.status(str(self.main_folder), "No subfolders")
             return
 
         for folder_path in subfolders:
             await self.upload_new_files_from_folder(folder_path)
 
+        self.status(str(self.main_folder), "Waiting")
+
     async def upload_new_files_from_folder(self, folder_path: Path) -> None:
         files = sorted(iter_files(folder_path))
 
         if not files:
-            print(f"[EMPTY] No files found in {folder_path}")
+            self.log(f"[EMPTY] No files found in {folder_path}")
             return
 
         folder_channel = await self.telegram_service.get_or_create_folder_channel(
@@ -85,12 +120,12 @@ class FolderScanner:
                 file_hash = file_sha256(file_path)
 
                 if self.database.is_file_uploaded(folder_path, file_hash):
-                    print(f"[SKIP] Already uploaded: {file_path}")
+                    self.log(f"[SKIP] Already uploaded: {file_path}")
                     continue
 
                 relative_name = file_path.relative_to(folder_path)
 
-                print(f"[UPLOAD] {file_path} -> {folder_channel.title}")
+                self.log(f"[UPLOAD] {file_path} -> {folder_channel.title}")
 
                 message = await self.telegram_service.send_file_to_folder_channel(
                     folder_channel=folder_channel,
@@ -106,13 +141,11 @@ class FolderScanner:
                     telegram_message_id=message.id if message else None,
                 )
 
-                print(f"[DONE] Uploaded: {file_path}")
+                self.log(f"[DONE] Uploaded: {file_path}")
 
             except FloodWaitError as exc:
-                import asyncio
-
-                print(f"[FLOOD WAIT] Telegram requested waiting {exc.seconds} seconds.")
+                self.log(f"[FLOOD WAIT] Telegram requested waiting {exc.seconds} seconds.")
                 await asyncio.sleep(exc.seconds)
 
             except Exception as exc:
-                print(f"[ERROR] Could not upload {file_path}: {exc}")
+                self.log(f"[ERROR] Could not upload {file_path}: {exc}")
