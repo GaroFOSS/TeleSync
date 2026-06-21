@@ -15,10 +15,16 @@ class SyncWorker(QThread):
     log_message = Signal(str)
     folder_status = Signal(str, str)
 
-    def __init__(self, config: AppConfig, main_folders: list[Path]):
+    def __init__(
+        self,
+        config: AppConfig,
+        main_folders: list[Path],
+        recursive_channels: bool,
+    ):
         super().__init__()
         self.config = config
         self.main_folders = main_folders
+        self.recursive_channels = recursive_channels
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
@@ -87,6 +93,7 @@ class SyncWorker(QThread):
                 index_channel=index_channel,
                 log=self.log_message.emit,
                 status=self.folder_status.emit,
+                recursive_channels=self.recursive_channels,
             )
 
             await scanner.scan_once()

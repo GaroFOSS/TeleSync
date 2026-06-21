@@ -4,6 +4,7 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
+    QCheckBox,
     QHBoxLayout,
     QHeaderView,
     QMainWindow,
@@ -17,7 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from app_state import AppState
-from config import AppConfig
+from config import AppConfig, load_config, load_env_settings
+from settings_dialog import SettingsDialog
 from database import Database
 from worker import SyncWorker
 
@@ -52,17 +54,25 @@ class MainWindow(QMainWindow):
         self.remove_button = QPushButton("Remove Selected")
         self.start_button = QPushButton("Start Sync")
         self.stop_button = QPushButton("Stop Sync")
+        self.settings_button = QPushButton("Settings")
+
+        self.recursive_checkbox = QCheckBox("Create channels recursively")
 
         self.stop_button.setEnabled(False)
+        self.recursive_checkbox.setChecked(self.state.recursive_channels)
 
         self.add_button.clicked.connect(self.add_main_folder)
         self.remove_button.clicked.connect(self.remove_selected_folder)
         self.start_button.clicked.connect(self.start_sync)
         self.stop_button.clicked.connect(self.stop_sync)
+        self.recursive_checkbox.stateChanged.connect(self.update_recursive_mode)
+        self.settings_button.clicked.connect(self.open_settings)
 
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.add_button)
         button_layout.addWidget(self.remove_button)
+        button_layout.addWidget(self.settings_button)
+        button_layout.addWidget(self.recursive_checkbox)
         button_layout.addStretch()
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.stop_button)
@@ -157,6 +167,7 @@ class MainWindow(QMainWindow):
         self.worker = SyncWorker(
             config=self.config,
             main_folders=main_folders,
+            recursive_channels=self.state.recursive_channels,
         )
 
         self.worker.log_message.connect(self.append_log)
@@ -169,6 +180,8 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(True)
         self.add_button.setEnabled(False)
         self.remove_button.setEnabled(False)
+        self.settings_button.setEnabled(False)
+        self.recursive_checkbox.setEnabled(False)
 
         self.append_log("[GUI] Sync started.")
 
@@ -184,6 +197,8 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         self.add_button.setEnabled(True)
         self.remove_button.setEnabled(True)
+        self.settings_button.setEnabled(True)
+        self.recursive_checkbox.setEnabled(True)
 
         self.update_all_statuses("Stopped")
 
@@ -212,3 +227,35 @@ class MainWindow(QMainWindow):
             self.worker.wait(3000)
 
         event.accept()
+
+    def update_recursive_mode(self) -> None:
+        enabled = self.recursive_checkbox.isChecked()
+        self.state.set_recursive_channels(enabled)
+
+        if enabled:
+            self.append_log("[CONFIG] Recursive channel creation enabled.")
+        else:
+            self.append_log("[CONFIG] Recursive channel creation disabled.")
+
+    def open_settings(self) -> None:
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.warning(
+                self,
+                "Sync is running",
+                "Stop the sync before changing settings.",
+            )
+            return
+
+        settings = load_env_settings()
+        dialog = SettingsDialog(settings, self)
+
+        if dialog.exec() == SettingsDialog.DialogCode.Accepted:
+            try:
+                self.config = load_config()
+                self.append_log("[CONFIG] Settings updated.")
+            except Exception as exc:
+                QMessageBox.critical(
+                    self,
+                    "Invalid settings",
+                    str(exc),
+                )

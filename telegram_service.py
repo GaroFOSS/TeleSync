@@ -9,6 +9,9 @@ from database import Database
 from models import FolderChannel, IndexChannel
 
 
+TelegramNotificationTarget = IndexChannel | FolderChannel
+
+
 def normalize_title(name: str) -> str:
     title = re.sub(r"\s+", " ", name).strip()
     return title[:120] or "Uploaded Folder"
@@ -56,8 +59,7 @@ class TelegramService:
             message=(
                 "📌 **TeleSync index channel created**\n\n"
                 f"Main folder:\n`{main_folder.resolve()}`\n\n"
-                "Every new folder channel created inside this main folder "
-                "will be posted here."
+                "Top-level folder channels will be posted here."
             ),
         )
 
@@ -66,7 +68,7 @@ class TelegramService:
     async def get_or_create_folder_channel(
         self,
         folder_path: Path,
-        index_channel: IndexChannel,
+        notification_channel: TelegramNotificationTarget,
     ) -> FolderChannel:
         existing = self.database.get_folder_channel(folder_path)
 
@@ -75,13 +77,13 @@ class TelegramService:
 
         return await self.create_folder_channel(
             folder_path=folder_path,
-            index_channel=index_channel,
+            notification_channel=notification_channel,
         )
 
     async def create_folder_channel(
         self,
         folder_path: Path,
-        index_channel: IndexChannel,
+        notification_channel: TelegramNotificationTarget,
     ) -> FolderChannel:
         title = normalize_title(folder_path.name)
 
@@ -116,8 +118,8 @@ class TelegramService:
 
         self.database.save_folder_channel(folder_channel)
 
-        await self.notify_index_channel_about_folder_channel(
-            index_channel=index_channel,
+        await self.notify_channel_about_folder_channel(
+            notification_channel=notification_channel,
             folder_path=folder_path,
             folder_channel=folder_channel,
         )
@@ -142,9 +144,9 @@ class TelegramService:
 
         return getattr(invite, "link", None)
 
-    async def notify_index_channel_about_folder_channel(
+    async def notify_channel_about_folder_channel(
         self,
-        index_channel: IndexChannel,
+        notification_channel: TelegramNotificationTarget,
         folder_path: Path,
         folder_channel: FolderChannel,
     ) -> None:
@@ -166,13 +168,13 @@ class TelegramService:
             )
 
         await self.send_message_to_channel(
-            channel=index_channel,
+            channel=notification_channel,
             message=message,
         )
 
     async def send_message_to_channel(
         self,
-        channel: IndexChannel | FolderChannel,
+        channel: TelegramNotificationTarget,
         message: str,
     ) -> None:
         peer = InputPeerChannel(
